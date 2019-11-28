@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -36,22 +37,91 @@ namespace ThinkerThings.Services.Account.Api.Infra
 
         private string DaprEndpointStateManagement => $"{_daprOptions.Value.EndPoint}/state";
 
+        public async Task Save<TValue>(string key, TValue value, CancellationToken cancellationToken = default)
+        {
+            var httpResponseMessage = await ExecuteSendAsync(HttpMethod.Post, key, value, cancellationToken).ConfigureAwait(false);
+
+            //Failed to save state
+            if (httpResponseMessage.StatusCode == HttpStatusCode.InternalServerError)
+            {
+                throw new HttpRequestException($"Failed to get state with status code '{httpResponseMessage.StatusCode}'.");
+            }
+            //State store is missing or misconfigured
+            else if (httpResponseMessage.StatusCode == HttpStatusCode.BadRequest)
+            {
+                var error = await httpResponseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
+                throw new HttpRequestException($"Failed to get state with status code '{httpResponseMessage.StatusCode}': {error}.");
+            }
+            //State saved
+            else if (httpResponseMessage.StatusCode == HttpStatusCode.Created)
+            {
+                return;
+            }
+        }
+
         public async Task<TValue> Get<TValue>(string key, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(key))
                 throw new ArgumentException("The value cannot be null or empty.", nameof(key));
 
-            var stateUrl = $"{DaprEndpointStateManagement}/{typeof(TValue).Name.ToLowerInvariant()}-{key}";
+            var httpResponseMessage = await ExecuteSendAsync<TValue>(HttpMethod.Get, key, cancellationToken).ConfigureAwait(false);
+
+            return await ValidaStatusIsNotSuccess<TValue>(httpResponseMessage).ConfigureAwait(false);
+        }
+
+        public async Task Delete<TValue>(string key, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentException("The value cannot be null or empty.", nameof(key));
+
+            var httpResponseMessage = await ExecuteSendAsync<TValue>(HttpMethod.Delete, key, cancellationToken).ConfigureAwait(false);
+
+            await ValidaStatusIsNotSuccess<TValue>(httpResponseMessage).ConfigureAwait(false);
+        }
+
+        private async Task<HttpResponseMessage> ExecuteSendAsync<TValue>(HttpMethod httpMethod, string key, CancellationToken cancellationToken)
+            => await ExecuteSendAsync(httpMethod, key, default(TValue), cancellationToken).ConfigureAwait(false);
+
+        private async Task<HttpResponseMessage> ExecuteSendAsync<TValue>(HttpMethod httpMethod, string key, TValue value, CancellationToken cancellationToken)
+        {
+            const string CONTENT_TYPE = "application/json";
 
             var httpClient = _httpClientFactory.CreateClient();
 
             httpClient.DefaultRequestHeaders.Clear();
-            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue(CONTENT_TYPE));
 
-            var httpResponseMessage = await httpClient.GetAsync(stateUrl, CancellationToken.None).ConfigureAwait(false);
-
-            return await ValidaStatusIsNotSuccess<TValue>(httpResponseMessage).ConfigureAwait(false);
+            return await httpClient.SendAsync(CreateHttpRequestMessage(httpMethod, key, value, CONTENT_TYPE), cancellationToken).ConfigureAwait(false);
         }
+
+        private HttpRequestMessage CreateHttpRequestMessage<TValue>(HttpMethod httpMethod, string key, TValue value, string CONTENT_TYPE)
+        {
+            var request = new HttpRequestMessage
+            {
+                Method = httpMethod
+            };
+
+            if (httpMethod.Equals(HttpMethod.Post))
+            {
+                request.RequestUri = new Uri(DaprEndpointStateManagement);
+                request.Content = new StringContent(CreateContent(new StateEntry<TValue>(key, value)), Encoding.UTF8, CONTENT_TYPE);
+            }
+            else
+            {
+                request.RequestUri = new Uri(CreateStateManagamentKey<TValue>(key));
+            }
+
+            return request;
+        }
+
+        private string CreateStateManagamentKey<TValue>(string key)
+            => $"{DaprEndpointStateManagement}/{typeof(TValue).Name.ToLowerInvariant()}-{key}";
+
+        private static string CreateContent<TValue>(StateEntry<TValue> stateStore)
+            => CreateContent(new List<StateEntry<TValue>>() { stateStore });
+
+        private static string CreateContent<TValue>(IEnumerable<StateEntry<TValue>> stateStoreEntries)
+            => JsonSerializer.Serialize(stateStoreEntries.ToArray());
 
         private async Task<TValue> ValidaStatusIsNotSuccess<TValue>(HttpResponseMessage httpResponseMessage)
         {
@@ -80,73 +150,16 @@ namespace ThinkerThings.Services.Account.Api.Infra
             var content = await httpResponseMessage.Content.ReadAsStringAsync();
             return JsonSerializer.Deserialize<TValue>(content);
         }
-
-        public async Task Save<TValue>(string key, TValue value, CancellationToken cancellationToken = default)
-        {
-            var httpResponseMessage = await ExecuteSendAsync(HttpMethod.Post, new StateStoreEntry<TValue>(key, value));
-
-            //Failed to save state
-            if (httpResponseMessage.StatusCode == HttpStatusCode.InternalServerError)
-            {
-                throw new HttpRequestException($"Failed to get state with status code '{httpResponseMessage.StatusCode}'.");
-            }
-            //State store is missing or misconfigured
-            else if (httpResponseMessage.StatusCode == HttpStatusCode.BadRequest)
-            {
-                var error = await httpResponseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
-                throw new HttpRequestException($"Failed to get state with status code '{httpResponseMessage.StatusCode}': {error}.");
-            }
-            //State saved
-            else if (httpResponseMessage.StatusCode == HttpStatusCode.Created)
-            {
-                return;
-            }
-        }
-
-        public async Task Delete<TValue>(string key, CancellationToken cancellationToken = default)
-        {
-            var entry = await Get<TValue>(key);
-
-            if (string.IsNullOrEmpty(key))
-            {
-                throw new ArgumentException("The value cannot be null or empty.", nameof(key));
-            }
-
-            var stateUrl = $"{DaprEndpointStateManagement}/{typeof(TValue).Name.ToLowerInvariant()}-{key}";
-
-            var httpClient = _httpClientFactory.CreateClient();
-
-            httpClient.DefaultRequestHeaders.Clear();
-            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-            var httpResponseMessage = await httpClient.DeleteAsync(stateUrl, CancellationToken.None).ConfigureAwait(false);
-
-            await ValidaStatusIsNotSuccess<TValue>(httpResponseMessage).ConfigureAwait(false);
-        }
-
-        private async Task<HttpResponseMessage> ExecuteSendAsync<TValue>(HttpMethod httpMethod, StateStoreEntry<TValue> stateStore)
-        {
-            using var request = new HttpRequestMessage(httpMethod, DaprEndpointStateManagement)
-            {
-                Content = new StringContent(CreateContent(stateStore), Encoding.UTF8, "application/json")
-            };
-
-            var httpClient = _httpClientFactory.CreateClient();
-            return await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None).ConfigureAwait(false);
-        }
-
-        private static string CreateContent<TValue>(StateStoreEntry<TValue> stateStore)
-            => JsonSerializer.Serialize(new List<StateStoreEntry<TValue>>() { stateStore }.ToArray());
     }
 
-    public class StateStoreEntry<TValue>
+    internal class StateEntry<TValue>
     {
-        public StateStoreEntry(TValue value)
+        public StateEntry(TValue value)
             : this(Guid.NewGuid().ToString(), value)
         {
         }
 
-        public StateStoreEntry(string key, TValue value)
+        public StateEntry(string key, TValue value)
         {
             Value = value;
             Key = CreateKey(key, value);

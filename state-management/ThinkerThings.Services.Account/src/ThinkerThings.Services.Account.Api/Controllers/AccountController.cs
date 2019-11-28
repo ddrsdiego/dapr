@@ -27,6 +27,11 @@ namespace ThinkerThings.Services.Account.Api.Controllers
         public async Task<IActionResult> Get(int accountId)
         {
             var account = await _daprStateClientRepository.Get<Models.Account>(accountId.ToString());
+            if (account == null)
+            {
+                return NoContent();
+            }
+
             return Ok(account);
         }
 
