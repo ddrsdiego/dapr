@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
+    <UserSecretsId>9a8422d4-14b2-4d63-91bf-5245a26a1c30</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <DockerfileContext>..\..</DockerfileContext>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.9.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Dapr.AspNetCore">
+      <HintPath>..\..\..\..\..\samples\dotnet-sdk\bin\Debug\prod\Dapr.AspNetCore\Dapr.AspNetCore.dll</HintPath>
+    </Reference>
+    <Reference Include="Dapr.Client">
+      <HintPath>..\..\..\..\..\samples\dotnet-sdk\bin\Debug\prod\Dapr.AspNetCore\Dapr.Client.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
