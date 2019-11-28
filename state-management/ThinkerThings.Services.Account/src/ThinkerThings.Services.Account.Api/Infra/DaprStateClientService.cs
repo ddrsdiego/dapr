@@ -13,22 +13,15 @@ using System.Threading.Tasks;
 
 namespace ThinkerThings.Services.Account.Api.Infra
 {
-    public interface IDaprStateClientRepository
-    {
-        Task Delete<TValue>(string key, CancellationToken cancellationToken = default);
-
-        Task Save<TValue>(string key, TValue value, CancellationToken cancellationToken = default);
-
-        Task<TValue> Get<TValue>(string key, CancellationToken cancellationToken = default);
-    }
-
-    public class DaprStateClientRepository : IDaprStateClientRepository
+    public sealed class DaprStateClientService : IDaprStateClientService
     {
         private readonly IOptions<DaprOptions> _daprOptions;
         private readonly IHttpClientFactory _httpClientFactory;
-        private readonly ILogger<DaprStateClientRepository> _logger;
+        private readonly ILogger<DaprStateClientService> _logger;
 
-        public DaprStateClientRepository(IHttpClientFactory httpClientFactory, IOptions<DaprOptions> daprOptions, ILogger<DaprStateClientRepository> logger)
+        private const string CONTENT_TYPE = "application/json";
+
+        public DaprStateClientService(IHttpClientFactory httpClientFactory, IOptions<DaprOptions> daprOptions, ILogger<DaprStateClientService> logger)
         {
             _logger = logger;
             _daprOptions = daprOptions;
@@ -39,6 +32,12 @@ namespace ThinkerThings.Services.Account.Api.Infra
 
         public async Task Save<TValue>(string key, TValue value, CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentException("The value cannot be null or empty.", nameof(key));
+
+            if (value == null)
+                throw new ArgumentException("The value cannot be null or empty.", nameof(value));
+
             var httpResponseMessage = await ExecuteSendAsync(HttpMethod.Post, key, value, cancellationToken).ConfigureAwait(false);
 
             //Failed to save state
@@ -61,9 +60,6 @@ namespace ThinkerThings.Services.Account.Api.Infra
 
         public async Task<TValue> Get<TValue>(string key, CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrEmpty(key))
-                throw new ArgumentException("The value cannot be null or empty.", nameof(key));
-
             var httpResponseMessage = await ExecuteSendAsync<TValue>(HttpMethod.Get, key, cancellationToken).ConfigureAwait(false);
 
             return await ValidaStatusIsNotSuccess<TValue>(httpResponseMessage).ConfigureAwait(false);
@@ -71,9 +67,6 @@ namespace ThinkerThings.Services.Account.Api.Infra
 
         public async Task Delete<TValue>(string key, CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrEmpty(key))
-                throw new ArgumentException("The value cannot be null or empty.", nameof(key));
-
             var httpResponseMessage = await ExecuteSendAsync<TValue>(HttpMethod.Delete, key, cancellationToken).ConfigureAwait(false);
 
             await ValidaStatusIsNotSuccess<TValue>(httpResponseMessage).ConfigureAwait(false);
@@ -84,22 +77,20 @@ namespace ThinkerThings.Services.Account.Api.Infra
 
         private async Task<HttpResponseMessage> ExecuteSendAsync<TValue>(HttpMethod httpMethod, string key, TValue value, CancellationToken cancellationToken)
         {
-            const string CONTENT_TYPE = "application/json";
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentException("The value cannot be null or empty.", nameof(key));
 
             var httpClient = _httpClientFactory.CreateClient();
 
             httpClient.DefaultRequestHeaders.Clear();
             httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue(CONTENT_TYPE));
 
-            return await httpClient.SendAsync(CreateHttpRequestMessage(httpMethod, key, value, CONTENT_TYPE), cancellationToken).ConfigureAwait(false);
+            return await httpClient.SendAsync(CreateHttpRequestMessage(httpMethod, key, value), cancellationToken).ConfigureAwait(false);
         }
 
-        private HttpRequestMessage CreateHttpRequestMessage<TValue>(HttpMethod httpMethod, string key, TValue value, string CONTENT_TYPE)
+        private HttpRequestMessage CreateHttpRequestMessage<TValue>(HttpMethod httpMethod, string key, TValue value)
         {
-            var request = new HttpRequestMessage
-            {
-                Method = httpMethod
-            };
+            var request = new HttpRequestMessage { Method = httpMethod };
 
             if (httpMethod.Equals(HttpMethod.Post))
             {
@@ -120,8 +111,7 @@ namespace ThinkerThings.Services.Account.Api.Infra
         private static string CreateContent<TValue>(StateEntry<TValue> stateStore)
             => CreateContent(new List<StateEntry<TValue>>() { stateStore });
 
-        private static string CreateContent<TValue>(IEnumerable<StateEntry<TValue>> stateStoreEntries)
-            => JsonSerializer.Serialize(stateStoreEntries.ToArray());
+        private static string CreateContent<TValue>(IEnumerable<StateEntry<TValue>> stateStoreEntries) => JsonSerializer.Serialize(stateStoreEntries.ToArray());
 
         private async Task<TValue> ValidaStatusIsNotSuccess<TValue>(HttpResponseMessage httpResponseMessage)
         {

@@ -8,9 +8,9 @@ namespace ThinkerThings.Services.Account.Api.Controllers
     [Route("[controller]")]
     public class AccountController : ControllerBase
     {
-        private readonly IDaprStateClientRepository _daprStateClientRepository;
+        private readonly IDaprStateClientService _daprStateClientRepository;
 
-        public AccountController(IDaprStateClientRepository daprStateClientRepository)
+        public AccountController(IDaprStateClientService daprStateClientRepository)
         {
             _daprStateClientRepository = daprStateClientRepository;
         }

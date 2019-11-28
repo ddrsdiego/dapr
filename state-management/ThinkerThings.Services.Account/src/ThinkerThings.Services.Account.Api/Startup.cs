@@ -21,7 +21,7 @@ namespace ThinkerThings.Services.Account.Api
             services.AddHttpClient();
             services.AddDaprClient();
             services.AddControllers();
-            services.AddTransient<IDaprStateClientRepository, DaprStateClientRepository>();
+            services.AddTransient<IDaprStateClientService, DaprStateClientService>();
 
             services.Configure<DaprOptions>(Configuration.GetSection(nameof(DaprOptions)));
         }
